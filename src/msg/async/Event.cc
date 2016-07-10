@@ -40,13 +40,13 @@ class C_handle_notify : public EventCallback {
   void do_request(int fd_or_id) {
     char c[256];
     do {
-      center->already_wakeup.set(0);
       int r = read(fd_or_id, c, sizeof(c));
       if (r < 0) {
-        ldout(cct, 1) << __func__ << " read notify pipe failed: " << cpp_strerror(errno) << dendl;
+        if (errno != EAGAIN)
+          ldout(cct, 1) << __func__ << " read notify pipe failed: " << cpp_strerror(errno) << dendl;
         break;
       }
-    } while (center->already_wakeup.read());
+    } while (1);
   }
 };
 
@@ -257,15 +257,18 @@ void EventCenter::delete_time_event(uint64_t id)
 
 void EventCenter::wakeup()
 {
-    ldout(cct, 1) << __func__ << dendl;
-    already_wakeup.compare_and_swap(0, 1);
+  ldout(cct, 1) << __func__ << dendl;
 
+  if (!external_num_events.load()) {
     char buf[1];
     buf[0] = 'c';
     // wake up "event_wait"
     int n = write(notify_send_fd, buf, 1);
-    // FIXME ?
-    assert(n == 1);
+    if (n < 0) {
+      ldout(cct, 1) << __func__ << " write notify pipe failed: " << cpp_strerror(errno) << dendl;
+      assert(0);
+    }
+  }
 }
 
 int EventCenter::process_time_events()
